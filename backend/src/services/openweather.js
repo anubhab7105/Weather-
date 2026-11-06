@@ -1,11 +1,13 @@
 const axios = require('axios');
 const { createCache } = require('./cache');
 const env = require('../config/env');
+const { HttpError } = require('../errors/http-error');
 
 const cache = createCache(env.CACHE_TTL);
 
 function buildKey(params) {
-  return 'wx:' + JSON.stringify(params);
+  if (params.city) return 'wx:city:' + params.city.trim().toLocaleLowerCase();
+  return 'wx:coords:' + Number(params.lat) + ':' + Number(params.lon);
 }
 
 function locationParams({ city, lat, lon }) {
@@ -16,7 +18,7 @@ function locationParams({ city, lat, lon }) {
 }
 
 async function request(path, params) {
-  const url = `${env.OPENWEATHER_BASE_URL}${path}`;
+  const url = env.OPENWEATHER_BASE_URL.replace(/\/$/, '') + path;
   const response = await axios.get(url, {
     params: { ...params, appid: env.OPENWEATHER_API_KEY, units: 'metric' },
     timeout: env.REQUEST_TIMEOUT,
@@ -25,9 +27,10 @@ async function request(path, params) {
 }
 
 function mockWeather({ city, lat, lon }) {
-  const name = city || `Location (${Number(lat).toFixed(2)}, ${Number(lon).toFixed(2)})`;
+  const name = city || 'Location (' + Number(lat).toFixed(2) + ', ' + Number(lon).toFixed(2) + ')';
   const now = new Date();
   const baseTemp = 18 + Math.round(Math.sin(now.getHours() / 24 * Math.PI) * 6);
+
   return {
     city: name,
     country: 'XX',
@@ -44,20 +47,20 @@ function mockWeather({ city, lat, lon }) {
       sunset: Math.floor(Date.now() / 1000) + 3600 * 6,
       dt: Math.floor(Date.now() / 1000),
     },
-    forecast: Array.from({ length: 5 }, (_, i) => {
-      const d = new Date(now);
-      d.setDate(d.getDate() + i + 1);
+    forecast: Array.from({ length: 5 }, (_, index) => {
+      const date = new Date();
+      date.setUTCDate(date.getUTCDate() + index + 1);
       return {
-        date: d.toISOString().slice(0, 10),
-        tempMin: baseTemp - 3 - i,
-        tempMax: baseTemp + 4 - i,
-        description: i % 2 === 0 ? 'partly cloudy' : 'light rain',
-        icon: i % 2 === 0 ? '02d' : '10d',
-        humidity: 50 + i * 5,
-        windSpeed: 3 + i,
+        date: date.toISOString().slice(0, 10),
+        tempMin: baseTemp - 3 - index,
+        tempMax: baseTemp + 4 - index,
+        description: index % 2 === 0 ? 'partly cloudy' : 'light rain',
+        icon: index % 2 === 0 ? '02d' : '10d',
+        humidity: 50 + index * 5,
+        windSpeed: 3 + index,
       };
     }),
-    source: 'mock',
+    source: 'demo',
     cached: false,
   };
 }
@@ -78,73 +81,120 @@ function normalizeCurrent(data) {
   };
 }
 
-function normalizeForecast(data) {
-  // data.list is 3-hourly; group by day
+function localDate(epochSeconds, timezoneOffsetSeconds) {
+  return new Date((epochSeconds + timezoneOffsetSeconds) * 1000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+function normalizeForecast(data, timezoneOffsetSeconds = 0, currentTimestamp = Math.floor(Date.now() / 1000)) {
+  const today = localDate(currentTimestamp, timezoneOffsetSeconds);
   const byDay = new Map();
+
   for (const item of data.list || []) {
-    const date = item.dt_txt.slice(0, 10);
-    if (!byDay.has(date)) {
-      byDay.set(date, { temps: [], items: [] });
-    }
-    const g = byDay.get(date);
-    g.temps.push(item.main.temp);
-    g.items.push(item);
+    const timestamp = Number(item.dt);
+    if (!Number.isFinite(timestamp)) continue;
+
+    const date = localDate(timestamp, timezoneOffsetSeconds);
+    // The current calendar day is partial; only show upcoming forecast days.
+    if (date <= today) continue;
+
+    if (!byDay.has(date)) byDay.set(date, { temps: [], items: [] });
+
+    const group = byDay.get(date);
+    if (Number.isFinite(item.main?.temp)) group.temps.push(item.main.temp);
+    group.items.push(item);
   }
-  const result = [];
-  for (const [date, g] of byDay) {
-    if (result.length >= 5) break;
-    // skip today partially? keep all
-    const mid = g.items[Math.floor(g.items.length / 2)] || g.items[0];
-    result.push({
+
+  return Array.from(byDay.entries()).slice(0, 5).map(([date, group]) => {
+    const middle = group.items[Math.floor(group.items.length / 2)] || group.items[0];
+    return {
       date,
-      tempMin: Math.min(...g.temps),
-      tempMax: Math.max(...g.temps),
-      description: mid.weather?.[0]?.description || '',
-      icon: mid.weather?.[0]?.icon || '01d',
-      humidity: mid.main.humidity,
-      windSpeed: mid.wind.speed,
-    });
+      tempMin: group.temps.length ? Math.min(...group.temps) : null,
+      tempMax: group.temps.length ? Math.max(...group.temps) : null,
+      description: middle.weather?.[0]?.description || '',
+      icon: middle.weather?.[0]?.icon || '01d',
+      humidity: middle.main?.humidity,
+      windSpeed: middle.wind?.speed,
+    };
+  });
+}
+
+function mapProviderError(err) {
+  const providerStatus = err?.response?.status;
+
+  if (providerStatus === 404) {
+    return new HttpError(404, 'City or location was not found', 'LOCATION_NOT_FOUND');
   }
-  return result.slice(0, 5);
+  if (providerStatus === 401 || providerStatus === 403) {
+    return new HttpError(502, 'Weather provider rejected the API key. Check OPENWEATHER_API_KEY.', 'WEATHER_PROVIDER_AUTH_ERROR');
+  }
+  if (providerStatus === 429) {
+    return new HttpError(503, 'Weather provider rate limit reached. Please try again later.', 'WEATHER_PROVIDER_RATE_LIMIT');
+  }
+  if (providerStatus === 400) {
+    return new HttpError(400, 'Weather provider rejected the requested location', 'INVALID_LOCATION');
+  }
+  if (err?.code === 'ECONNABORTED' || err?.code === 'ETIMEDOUT') {
+    return new HttpError(504, 'Weather provider request timed out', 'WEATHER_PROVIDER_TIMEOUT');
+  }
+  return new HttpError(502, 'Unable to retrieve weather from the provider', 'WEATHER_PROVIDER_UNAVAILABLE');
 }
 
 async function getWeather(params) {
   const key = buildKey(params);
   const cached = cache.get(key);
-  if (cached) {
-    return { ...cached, cached: true };
-  }
 
-  // Fallback to mock if no API key
+  if (cached) return { ...cached, cached: true };
+
   if (!env.OPENWEATHER_API_KEY) {
-    const mock = mockWeather(params);
-    cache.set(key, mock);
-    return mock;
+    if (env.WEATHER_DEMO_MODE) {
+      const demo = mockWeather(params);
+      cache.set(key, demo);
+      return demo;
+    }
+
+    throw new HttpError(
+      503,
+      'Weather API is not configured. Set OPENWEATHER_API_KEY, or enable WEATHER_DEMO_MODE for demo data.',
+      'WEATHER_NOT_CONFIGURED'
+    );
   }
 
-  const lp = locationParams(params);
+  const location = locationParams(params);
+
   try {
     const [currentData, forecastData] = await Promise.all([
-      request('/weather', lp),
-      request('/forecast', lp),
+      request('/weather', location),
+      request('/forecast', location),
     ]);
+
     const result = {
       city: currentData.name,
       country: currentData.sys?.country,
       current: normalizeCurrent(currentData),
-      forecast: normalizeForecast(forecastData),
+      forecast: normalizeForecast(
+        forecastData,
+        Number(currentData.timezone) || 0,
+        Number(currentData.dt) || Math.floor(Date.now() / 1000)
+      ),
       source: 'openweathermap',
       cached: false,
     };
+
+    // Only successful provider responses enter the cache.
     cache.set(key, result);
     return result;
   } catch (err) {
-    // Fallback to mock on error
-    const mock = mockWeather(params);
-    mock.error = err?.response?.data?.message || err.message;
-    cache.set(key, mock);
-    return mock;
+    throw mapProviderError(err);
   }
 }
 
-module.exports = { getWeather, hasApiKey: () => Boolean(env.OPENWEATHER_API_KEY) };
+module.exports = {
+  getWeather,
+  hasApiKey: () => Boolean(env.OPENWEATHER_API_KEY),
+  normalizeForecast,
+  mapProviderError,
+  locationParams,
+  buildKey,
+};

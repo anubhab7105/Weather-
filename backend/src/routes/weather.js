@@ -1,5 +1,6 @@
 const express = require('express');
 const { getWeather } = require('../services/openweather');
+const { parseWeatherQuery } = require('../utils/weather-query');
 
 const router = express.Router();
 
@@ -9,14 +10,8 @@ router.get('/health', (req, res) => {
 
 router.get('/weather', async (req, res, next) => {
   try {
-    const { city, lat, lon } = req.query;
-    if (!city && (lat == null || lon == null)) {
-      return res.status(400).json({ error: 'Provide city or lat & lon' });
-    }
-    if (city && city.trim().length === 0) {
-      return res.status(400).json({ error: 'City cannot be empty' });
-    }
-    const data = await getWeather({ city: city?.trim(), lat, lon });
+    const params = parseWeatherQuery(req.query);
+    const data = await getWeather(params);
     res.json(data);
   } catch (err) {
     next(err);
