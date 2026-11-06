@@ -1,16 +1,22 @@
-# React + Vite
+# Weather Forecast frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React 19 + Vite client for the Weather Forecast API.
 
-Currently, two official plugins are available:
+## Development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+npm ci
+npm run dev
+```
 
-## React Compiler
+By default, Vite proxies `/api` to `http://localhost:5000`. Start the backend separately. For a separately hosted API, set `VITE_API_BASE_URL` to its base URL in `.env`.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Checks
 
-## Expanding the Oxlint configuration
+```bash
+npm test
+npm run lint
+npm run build
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+The browser stores successful responses under a location-specific cache key. A saved response is only used for the same city or rounded coordinates and expires after six hours. A saved-result notice is shown when it is used.
