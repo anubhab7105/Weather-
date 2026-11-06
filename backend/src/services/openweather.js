@@ -5,11 +5,21 @@ const { HttpError } = require('../errors/http-error');
 
 const cache = createCache(env.CACHE_TTL);
 
+/**
+ * Build a stable cache key for a city or coordinate search.
+ * @param {{city?: string, lat?: number, lon?: number}} params - Validated location query.
+ * @returns {string} Cache key.
+ */
 function buildKey(params) {
   if (params.city) return 'wx:city:' + params.city.trim().toLocaleLowerCase();
   return 'wx:coords:' + Number(params.lat) + ':' + Number(params.lon);
 }
 
+/**
+ * Convert a validated location into OpenWeatherMap query parameters.
+ * @param {{city?: string, lat?: number, lon?: number}} location - City or coordinates.
+ * @returns {Record<string, string | number>} Provider query parameters.
+ */
 function locationParams({ city, lat, lon }) {
   if (lat != null && lon != null) {
     return { lat: Number(lat), lon: Number(lon) };
@@ -17,6 +27,12 @@ function locationParams({ city, lat, lon }) {
   return { q: city };
 }
 
+/**
+ * Request one endpoint from the configured OpenWeatherMap API.
+ * @param {string} path - Provider endpoint path.
+ * @param {Record<string, string | number>} params - Location query parameters.
+ * @returns {Promise<Record<string, any>>} Provider response body.
+ */
 async function request(path, params) {
   const url = env.OPENWEATHER_BASE_URL.replace(/\/$/, '') + path;
   const response = await axios.get(url, {
@@ -26,6 +42,11 @@ async function request(path, params) {
   return response.data;
 }
 
+/**
+ * Generate clearly labelled fabricated weather for explicit demo mode.
+ * @param {{city?: string, lat?: number, lon?: number}} location - Requested location.
+ * @returns {Record<string, any>} Demo weather response.
+ */
 function mockWeather({ city, lat, lon }) {
   const name = city || 'Location (' + Number(lat).toFixed(2) + ', ' + Number(lon).toFixed(2) + ')';
   const now = new Date();
@@ -65,6 +86,11 @@ function mockWeather({ city, lat, lon }) {
   };
 }
 
+/**
+ * Normalize an OpenWeatherMap current-weather response for the frontend.
+ * @param {Record<string, any>} data - Current weather provider response.
+ * @returns {Record<string, any>} Normalized current conditions.
+ */
 function normalizeCurrent(data) {
   return {
     temp: data.main.temp,
@@ -81,12 +107,25 @@ function normalizeCurrent(data) {
   };
 }
 
+/**
+ * Format an epoch timestamp as a calendar date at a fixed timezone offset.
+ * @param {number} epochSeconds - Unix timestamp in seconds.
+ * @param {number} timezoneOffsetSeconds - Location UTC offset in seconds.
+ * @returns {string} Local calendar date in YYYY-MM-DD format.
+ */
 function localDate(epochSeconds, timezoneOffsetSeconds) {
   return new Date((epochSeconds + timezoneOffsetSeconds) * 1000)
     .toISOString()
     .slice(0, 10);
 }
 
+/**
+ * Group three-hour forecast entries into up to five future local calendar days.
+ * @param {{list?: Array<Record<string, any>>}} data - Provider forecast payload.
+ * @param {number} timezoneOffsetSeconds - Location UTC offset in seconds.
+ * @param {number} currentTimestamp - Current Unix timestamp in seconds.
+ * @returns {Array<Record<string, any>>} Daily forecast records.
+ */
 function normalizeForecast(data, timezoneOffsetSeconds = 0, currentTimestamp = Math.floor(Date.now() / 1000)) {
   const today = localDate(currentTimestamp, timezoneOffsetSeconds);
   const byDay = new Map();
@@ -120,6 +159,11 @@ function normalizeForecast(data, timezoneOffsetSeconds = 0, currentTimestamp = M
   });
 }
 
+/**
+ * Map provider and network failures to safe HTTP errors for API clients.
+ * @param {Error & {response?: {status?: number}, code?: string}} err - Original upstream error.
+ * @returns {HttpError} Public-facing operational error.
+ */
 function mapProviderError(err) {
   const providerStatus = err?.response?.status;
 
@@ -141,6 +185,13 @@ function mapProviderError(err) {
   return new HttpError(502, 'Unable to retrieve weather from the provider', 'WEATHER_PROVIDER_UNAVAILABLE');
 }
 
+/**
+ * Retrieve weather from cache, explicit demo mode, or OpenWeatherMap.
+ * Successful provider responses are cached; failures are returned as errors.
+ * @param {{city?: string, lat?: number, lon?: number}} params - Validated location query.
+ * @returns {Promise<Record<string, any>>} Normalized weather response.
+ * @throws {HttpError} When configuration or provider retrieval fails.
+ */
 async function getWeather(params) {
   const key = buildKey(params);
   const cached = cache.get(key);
@@ -186,6 +237,13 @@ async function getWeather(params) {
     cache.set(key, result);
     return result;
   } catch (err) {
+    // Log only error metadata: Axios error serialization can include request config and API-key params.
+    console.error(
+      '[weather-api] Weather provider operation failed:',
+      err?.code || err?.name || 'UnknownError',
+      err?.response?.status || 'no-status',
+      err?.message || 'No error message'
+    );
     throw mapProviderError(err);
   }
 }

@@ -31,14 +31,19 @@ app.use((err, req, res, next) => {
     ? err.status
     : 500;
   const isOperational = err.isOperational === true;
+  const isExposedClientError = !isOperational && status < 500 && err.expose === true;
 
-  if (!isOperational) {
+  if (!isOperational && !isExposedClientError) {
     console.error('[weather-api] Unexpected error:', err);
   }
 
   res.status(status).json({
-    error: isOperational ? err.message : 'Internal server error',
-    code: isOperational ? err.code : 'INTERNAL_SERVER_ERROR',
+    error: isOperational || isExposedClientError ? err.message : 'Internal server error',
+    code: isOperational
+      ? err.code
+      : isExposedClientError
+        ? 'BAD_REQUEST'
+        : 'INTERNAL_SERVER_ERROR',
   });
 });
 

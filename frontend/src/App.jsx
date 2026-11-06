@@ -217,8 +217,8 @@ export default function App() {
                     <div className="f-date">{formatDate(forecast.date)}</div>
                     <img src={iconUrl(forecast.icon)} alt={forecast.description || 'Weather'} />
                     <div className="f-temps">
-                      <span className="max">{Math.round(forecast.tempMax)}°</span>
-                      <span className="min">{Math.round(forecast.tempMin)}°</span>
+                      <span className="max">{forecast.tempMax == null ? '–' : Math.round(forecast.tempMax) + '°'}</span>
+                      <span className="min">{forecast.tempMin == null ? '–' : Math.round(forecast.tempMin) + '°'}</span>
                     </div>
                     <div className="f-desc">{forecast.description}</div>
                   </div>

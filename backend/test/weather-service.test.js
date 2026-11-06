@@ -1,5 +1,7 @@
-delete process.env.OPENWEATHER_API_KEY;
-delete process.env.WEATHER_DEMO_MODE;
+// Set explicit values before importing the configuration module. dotenv does not override
+// existing environment variables, including an explicitly empty API key.
+process.env.OPENWEATHER_API_KEY = '';
+process.env.WEATHER_DEMO_MODE = 'false';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

@@ -22,7 +22,7 @@ frontend/   React + Vite user interface and browser cache tests
 
 ## Requirements
 
-- Node.js 22 or newer
+- Node.js 22.12.0 or newer
 - npm
 - An OpenWeatherMap API key for live weather
 
