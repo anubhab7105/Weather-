@@ -1,0 +1,18 @@
+:root {
+  --bg1: #0f172a;
+  --bg2: #1e3a8a;
+  --card: rgba(255,255,255,0.08);
+  --text: #f8fafc;
+  --muted: #cbd5e1;
+  --accent: #38bdf8;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: linear-gradient(135deg, var(--bg1), var(--bg2));
+  color: var(--text);
+  min-height: 100vh;
+}
+#root { min-height: 100vh; }
+button { cursor: pointer; }
